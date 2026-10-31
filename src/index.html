@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BFF: Key-Value Database</title>
+  
+  <!-- Shared Applied Tape Mechanics Design System (Loaded at runtime from GitHub Release via jsDelivr CDN) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/applied-tape-mechanics/bff-ui@v1.0.0/css/bff-theme.css">
+  <style>
+    .kv-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      background: #ffffff;
+      border: 1px solid #888888;
+      box-shadow: inset 1px 1px 0 #888888, 1px 1px 0 #ffffff;
+    }
+    .kv-table th {
+      background: linear-gradient(to bottom, #eeeeee 0%, #dddddd 100%);
+      padding: 6px 10px;
+      color: #000000;
+      font-weight: bold;
+      border-bottom: 1px solid #888888;
+      font-size: 11px;
+      text-align: left;
+    }
+    .kv-table td {
+      padding: 6px 10px;
+      border-bottom: 1px solid #e2e8f0;
+      vertical-align: middle;
+      color: #000000;
+    }
+    .cell-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+      gap: 4px;
+      margin-top: 10px;
+    }
+    .tape-byte {
+      font-family: var(--font-mono, monospace);
+      font-size: 11px;
+      padding: 3px 2px;
+      text-align: center;
+      background: #ffffff;
+      border: 1px solid #999999;
+      border-radius: 2px;
+      color: #666666;
+    }
+    .tape-byte.occupied {
+      background: #204070;
+      border-color: #000000;
+      color: #ffffff;
+      font-weight: bold;
+      box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.3);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="badge-bar">
+        <span class="pulse-dot"></span>
+        <span>Brainfuck Storage Tape (65,536 Cells)</span>
+      </div>
+      <h1>Key-Value Database</h1>
+      <p class="subtitle">A persistent key-value store whose storage medium and key-hasher is pure Brainfuck</p>
+    </header>
+
+    <div class="grid">
+      <!-- Left Column: Operations -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Set Key-Value</div>
+          <button class="preset-btn" onclick="viewBfHash()">Inspect BF Hasher</button>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:0.75rem;">
+          <input type="text" id="keyInput" placeholder="Key (e.g. user:1001, max 63 bytes)" style="padding:0.75rem; background:var(--code-bg); border:1px solid var(--card-border); border-radius:var(--radius-md); color:var(--text); font-family:'JetBrains Mono',monospace;">
+          <textarea id="valInput" placeholder="Value (e.g. Alice Cooper, max 189 bytes)" rows="3" style="min-height:80px;"></textarea>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="putKV()">Set Key</button>
+            <button class="btn btn-secondary" onclick="getKV()">Get Key</button>
+            <button class="btn btn-danger" onclick="deleteKV()">Delete Key</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Database Stats -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Storage Statistics</div>
+          <button class="preset-btn" onclick="refreshAll()">Refresh</button>
+        </div>
+        <div class="stats-bar" style="grid-template-columns: repeat(2, 1fr); margin-bottom:1rem;">
+          <div class="stat-pill">Entries: <span id="statCount">0</span></div>
+          <div class="stat-pill">Capacity: <span id="statCapacity">256</span></div>
+          <div class="stat-pill">Collisions: <span id="statCollisions">0</span></div>
+          <div class="stat-pill">Load: <span id="statLoad">0%</span></div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-secondary" onclick="loadTape(0, 128)">Dump Work Area (0-127)</button>
+          <button class="btn btn-secondary" onclick="loadTape(256, 128)">Dump Buckets (256+)</button>
+          <button class="btn btn-danger" onclick="clearDb()" style="margin-left:auto;">Wipe DB</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Entries Table -->
+    <div class="card" style="margin-top: 1.5rem;">
+      <div class="card-header">
+        <div class="card-title">Stored Entries</div>
+        <span id="entriesSummary" style="font-size:0.8rem; color:var(--text-muted);">0 items</span>
+      </div>
+      <div style="overflow-x: auto;">
+        <table class="kv-table">
+          <thead>
+            <tr>
+              <th style="width: 250px;">Key</th>
+              <th>Value</th>
+              <th style="width: 100px; text-align:right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="entriesBody">
+            <tr><td colspan="3" style="text-align:center; color:var(--text-muted);">No entries yet</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tape Memory Viewer -->
+    <div class="card" id="tapeCard" style="margin-top: 1.5rem;">
+      <div class="card-header">
+        <div class="card-title">Brainfuck Memory Tape Inspector</div>
+        <span id="tapeRange" style="font-size:0.8rem; color:var(--cyan); font-family:'JetBrains Mono',monospace;">Cells 0 - 127</span>
+      </div>
+      <div class="cell-grid" id="tapeGrid"></div>
+    </div>
+  </div>
+
+  <!-- Shared Applied Tape Mechanics Runtime & UI Kit (Loaded at runtime from GitHub Release via jsDelivr CDN) -->
+  <script src="https://cdn.jsdelivr.net/gh/applied-tape-mechanics/bff-interpreter@v1.0.0/bff-interpreter.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/applied-tape-mechanics/bff-ui@v1.0.0/js/bff-ui.js"></script>
+  <script>
+    const BF_HASH = __BF_HASH__;
+    const TAPE_SIZE = 65536;
+    const WORK_AREA_START = 0;
+    const WORK_AREA_SIZE = 256;
+    const STORAGE_START = 256;
+    const BUCKET_SIZE = 255;
+    const BUCKET_COUNT = 256;
+    const KEY_MAX_LEN = 63;
+    const VALUE_MAX_LEN = 189;
+    const VAL_OFFSET = 65;
+    const EMPTY = 0;
+    const OCCUPIED = 1;
+    const TOMBSTONE = 2;
+
+    const textEncoder = new TextEncoder();
+    const textDecoder = new TextDecoder();
+
+    // Client-side fallback database storing records directly in the 65,536-cell (64k) BrainfuckVM tape
+    const clientVM = (typeof BrainfuckVM !== 'undefined') ? new BrainfuckVM({ tapeSize: TAPE_SIZE }) : null;
+    let clientCollisions = 0;
+    let currentTapeStart = 256;
+    let currentTapeLen = 128;
+
+    function isApiOnline() {
+      return Boolean(window.BffUI && BffUI.api && BffUI.api.detected);
+    }
+
+    function hashKeyClient(key) {
+      if (!clientVM) return 0;
+      const encoded = textEncoder.encode(key);
+      const keyBytes = new Uint8Array(encoded.length + 1);
+      keyBytes.set(encoded);
+      keyBytes[keyBytes.length - 1] = 0;
+
+      const saved = clientVM.readTape(WORK_AREA_START, WORK_AREA_SIZE);
+      const savedPtr = clientVM.pointer;
+
+      clientVM.writeTape(WORK_AREA_START, new Uint8Array(WORK_AREA_SIZE));
+      clientVM.pointer = 0;
+      const out = clientVM.execute(BF_HASH, keyBytes, { resetTape: false });
+
+      clientVM.writeTape(WORK_AREA_START, saved);
+      clientVM.pointer = savedPtr;
+      return out.length > 0 ? out[0] : 0;
+    }
+
+    function bucketAddr(idx) {
+      return STORAGE_START + (((idx % BUCKET_COUNT) + BUCKET_COUNT) % BUCKET_COUNT) * BUCKET_SIZE;
+    }
+
+    function readBucketKey(addr) {
+      const raw = clientVM.readTape(addr + 1, KEY_MAX_LEN + 1);
+      const end = raw.indexOf(0);
+      return textDecoder.decode(raw.slice(0, end >= 0 ? end : raw.length));
+    }
+
+    function readBucketVal(addr) {
+      const raw = clientVM.readTape(addr + VAL_OFFSET, VALUE_MAX_LEN + 1);
+      const end = raw.indexOf(0);
+      return textDecoder.decode(raw.slice(0, end >= 0 ? end : raw.length));
+    }
+
+    function writeBucket(addr, key, value) {
+      clientVM.writeCell(addr, OCCUPIED);
+      const kBytes = textEncoder.encode(key).slice(0, KEY_MAX_LEN);
+      const kSlot = new Uint8Array(KEY_MAX_LEN + 1);
+      kSlot.set(kBytes);
+      clientVM.writeTape(addr + 1, kSlot);
+
+      const vBytes = textEncoder.encode(value).slice(0, VALUE_MAX_LEN);
+      const vSlot = new Uint8Array(VALUE_MAX_LEN + 1);
+      vSlot.set(vBytes);
+      clientVM.writeTape(addr + VAL_OFFSET, vSlot);
+    }
+
+    function clientSet(key, value) {
+      if (!clientVM) return false;
+      const start = hashKeyClient(key);
+      let firstTomb = null;
+
+      for (let probe = 0; probe < BUCKET_COUNT; probe++) {
+        const idx = (start + probe) % BUCKET_COUNT;
+        const addr = bucketAddr(idx);
+        const fl = clientVM.readCell(addr);
+
+        if (fl === EMPTY) {
+          const target = firstTomb !== null ? bucketAddr(firstTomb) : addr;
+          writeBucket(target, key, value);
+          if (probe > 0) clientCollisions++;
+          return target;
+        }
+        if (fl === TOMBSTONE) {
+          if (firstTomb === null) firstTomb = idx;
+        } else if (fl === OCCUPIED && readBucketKey(addr) === key) {
+          writeBucket(addr, key, value);
+          return addr;
+        }
+      }
+      if (firstTomb !== null) {
+        const target = bucketAddr(firstTomb);
+        writeBucket(target, key, value);
+        return target;
+      }
+      return null;
+    }
+
+    function clientGet(key) {
+      if (!clientVM) return null;
+      const start = hashKeyClient(key);
+      for (let probe = 0; probe < BUCKET_COUNT; probe++) {
+        const idx = (start + probe) % BUCKET_COUNT;
+        const addr = bucketAddr(idx);
+        const fl = clientVM.readCell(addr);
+        if (fl === EMPTY) return null;
+        if (fl === TOMBSTONE) continue;
+        if (fl === OCCUPIED && readBucketKey(addr) === key) {
+          return readBucketVal(addr);
+        }
+      }
+      return null;
+    }
+
+    function clientDelete(key) {
+      if (!clientVM) return false;
+      const start = hashKeyClient(key);
+      for (let probe = 0; probe < BUCKET_COUNT; probe++) {
+        const idx = (start + probe) % BUCKET_COUNT;
+        const addr = bucketAddr(idx);
+        const fl = clientVM.readCell(addr);
+        if (fl === EMPTY) return false;
+        if (fl === TOMBSTONE) continue;
+        if (fl === OCCUPIED && readBucketKey(addr) === key) {
+          clientVM.writeCell(addr, TOMBSTONE);
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function clientItems() {
+      const items = [];
+      if (!clientVM) return items;
+      for (let i = 0; i < BUCKET_COUNT; i++) {
+        const addr = bucketAddr(i);
+        if (clientVM.readCell(addr) === OCCUPIED) {
+          items.push({ key: readBucketKey(addr), value: readBucketVal(addr), bucket: i, addr });
+        }
+      }
+      return items;
+    }
+
+    async function refreshAll() {
+      await loadStats();
+      await loadEntries();
+      await loadTape(currentTapeStart, currentTapeLen);
+    }
+
+    async function loadStats() {
+      if (isApiOnline()) {
+        try {
+          const res = await fetch('/stats');
+          const d = await res.json();
+          const count = d.size ?? d.occupied_buckets ?? 0;
+          document.getElementById('statCount').innerText = count;
+          document.getElementById('statCapacity').innerText = d.capacity;
+          document.getElementById('statCollisions').innerText = d.collisions;
+          const load = ((count / d.capacity) * 100).toFixed(1) + '%';
+          document.getElementById('statLoad').innerText = load;
+          return;
+        } catch (e) {
+          console.warn('Backend /stats failed, using client DB:', e);
+        }
+      }
+      const items = clientItems();
+      document.getElementById('statCount').innerText = items.length;
+      document.getElementById('statCapacity').innerText = BUCKET_COUNT;
+      document.getElementById('statCollisions').innerText = clientCollisions;
+      const load = ((items.length / BUCKET_COUNT) * 100).toFixed(1) + '%';
+      document.getElementById('statLoad').innerText = load;
+    }
+
+    async function loadEntries() {
+      const tbody = document.getElementById('entriesBody');
+      tbody.innerHTML = '';
+
+      if (isApiOnline()) {
+        try {
+          const res = await fetch('/db');
+          const d = await res.json();
+          document.getElementById('entriesSummary').innerText = `${d.count} items`;
+
+          if (!d.entries || d.entries.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:var(--text-muted);">No entries stored</td></tr>';
+            return;
+          }
+
+          d.entries.forEach(item => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td><code style="color:#003366; font-weight:bold;">${item.key}</code></td>
+              <td><span style="color:#000000; font-family:var(--font-mono, monospace);">${item.value}</span></td>
+              <td style="text-align:right;">
+                <button class="preset-btn" onclick="selectKV('${item.key}', '${item.value.replace(/'/g, "\\'")}')">Edit</button>
+              </td>
+            `;
+            tbody.appendChild(tr);
+          });
+          return;
+        } catch (e) {
+          console.warn('Backend /db failed, using client DB:', e);
+        }
+      }
+
+      const items = clientItems();
+      document.getElementById('entriesSummary').innerText = `${items.length} items (Client JS VM)`;
+      if (items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:var(--text-muted);">No entries stored</td></tr>';
+        return;
+      }
+
+      items.forEach(item => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><code style="color:#003366; font-weight:bold;">${item.key}</code></td>
+          <td><span style="color:#000000; font-family:var(--font-mono, monospace);">${item.value}</span></td>
+          <td style="text-align:right;">
+            <button class="preset-btn" onclick="selectKV('${item.key}', '${item.value.replace(/'/g, "\\'")}')">Edit</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function loadTape(start = 0, length = 128) {
+      currentTapeStart = start;
+      currentTapeLen = length;
+      const grid = document.getElementById('tapeGrid');
+      grid.innerHTML = '';
+      document.getElementById('tapeRange').innerText = `Cells ${start} - ${start + length - 1}`;
+
+      if (isApiOnline()) {
+        try {
+          const res = await fetch(`/tape?start=${start}&length=${length}`);
+          const d = await res.json();
+          d.cells.forEach((val, idx) => {
+            const div = document.createElement('div');
+            div.className = 'tape-byte' + (val > 0 ? ' occupied' : '');
+            div.title = `Cell ${d.start + idx}: ${val} (0x${val.toString(16).padStart(2, '0')})`;
+            div.innerText = val.toString(16).padStart(2, '0');
+            grid.appendChild(div);
+          });
+          return;
+        } catch (e) {
+          console.warn('Backend /tape failed, reading client VM tape:', e);
+        }
+      }
+
+      if (clientVM) {
+        const slice = clientVM.readTape(start, length);
+        slice.forEach((val, idx) => {
+          const div = document.createElement('div');
+          div.className = 'tape-byte' + (val > 0 ? ' occupied' : '');
+          div.title = `Cell ${start + idx}: ${val} (0x${val.toString(16).padStart(2, '0')})`;
+          div.innerText = val.toString(16).padStart(2, '0');
+          grid.appendChild(div);
+        });
+      }
+    }
+
+    function selectKV(k, v) {
+      document.getElementById('keyInput').value = k;
+      document.getElementById('valInput').value = v;
+    }
+
+    async function putKV() {
+      const key = document.getElementById('keyInput').value.trim();
+      const value = document.getElementById('valInput').value;
+      if (!key) {
+        if (window.BffUI) BffUI.showToast('Please enter a key');
+        return;
+      }
+
+      if (isApiOnline()) {
+        try {
+          const res = await fetch('/db', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key, value })
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Failed to put');
+          }
+          if (window.BffUI) BffUI.showToast(`Saved key: ${key}`);
+          const bucketIdx = hashKeyClient(key);
+          currentTapeStart = bucketAddr(bucketIdx);
+          refreshAll();
+          return;
+        } catch (e) {
+          console.warn('Backend /db put failed, falling back to client DB:', e);
+        }
+      }
+
+      // Client-side pure JS Brainfuck VM store
+      const writtenAddr = clientSet(key, value);
+      if (writtenAddr !== null) {
+        currentTapeStart = writtenAddr;
+      }
+      if (window.BffUI) BffUI.showToast(`Saved key: ${key} (Client JS VM)`);
+      refreshAll();
+    }
+
+    async function getKV() {
+      const key = document.getElementById('keyInput').value.trim();
+      if (!key) return;
+
+      if (isApiOnline()) {
+        try {
+          const res = await fetch(`/db/${encodeURIComponent(key)}`);
+          if (res.ok) {
+            const data = await res.json();
+            document.getElementById('valInput').value = data.value;
+            if (window.BffUI) BffUI.showToast(`Loaded key: ${key}`);
+            return;
+          }
+        } catch (e) {
+          console.warn('Backend get failed, checking client DB:', e);
+        }
+      }
+
+      const val = clientGet(key);
+      if (val !== null) {
+        document.getElementById('valInput').value = val;
+        if (window.BffUI) BffUI.showToast(`Loaded key: ${key} (Client JS VM)`);
+      } else {
+        if (window.BffUI) BffUI.showToast('Key not found');
+        else alert('Key not found');
+      }
+    }
+
+    async function deleteKV() {
+      const key = document.getElementById('keyInput').value.trim();
+      if (!key) return;
+
+      if (isApiOnline()) {
+        try {
+          const res = await fetch(`/db/${encodeURIComponent(key)}`, { method: 'DELETE' });
+          if (res.ok) {
+            if (window.BffUI) BffUI.showToast(`Deleted key: ${key}`);
+            document.getElementById('valInput').value = '';
+            refreshAll();
+            return;
+          }
+        } catch (e) {
+          console.warn('Backend delete failed, falling back to client DB:', e);
+        }
+      }
+
+      if (clientDelete(key)) {
+        if (window.BffUI) BffUI.showToast(`Deleted key: ${key} (Client JS VM)`);
+        document.getElementById('valInput').value = '';
+        refreshAll();
+      } else {
+        if (window.BffUI) BffUI.showToast('Key not found');
+      }
+    }
+
+    async function clearDb() {
+      if (!confirm('Are you sure you want to clear the entire Brainfuck database?')) return;
+
+      if (isApiOnline()) {
+        try {
+          await fetch('/clear', { method: 'POST' });
+          if (window.BffUI) BffUI.showToast('Database cleared');
+          refreshAll();
+          return;
+        } catch (e) {
+          console.warn('Backend clear failed:', e);
+        }
+      }
+
+      clientCollisions = 0;
+      if (clientVM) clientVM.reset();
+      if (window.BffUI) BffUI.showToast('Database cleared (Client JS VM)');
+      refreshAll();
+    }
+
+    async function viewBfHash() {
+      let title = 'Brainfuck Key Hasher (hash.bf)';
+      let code = BF_HASH;
+
+      if (isApiOnline()) {
+        try {
+          const res = await fetch('/bf');
+          if (res.ok) {
+            const data = await res.json();
+            if (data.title) title = data.title;
+            if (data.code) code = data.code;
+          }
+        } catch (e) {
+          // Use inlined BF_HASH
+        }
+      }
+
+      if (window.BffUI) {
+        BffUI.showBfModal(
+          title,
+          code,
+          `Hash Program (${code.length} instructions): Computes key byte sum mod 256`
+        );
+      } else {
+        alert(`BF Hasher: ${code}`);
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      // Seed a default sample record when running standalone in the browser
+      setTimeout(() => {
+        if (!isApiOnline() && clientItems().length === 0) {
+          document.getElementById('keyInput').value = 'user:1001';
+          document.getElementById('valInput').value = 'Alice Cooper';
+          const addr = clientSet('user:1001', 'Alice Cooper');
+          if (addr !== null) currentTapeStart = addr;
+        }
+        refreshAll();
+      }, 60);
+    });
+  </script>
+</body>
+</html>
