@@ -3,7 +3,7 @@
 > **[Applied Tape Mechanics](https://github.com/applied-tape-mechanics)** — *Empirical computation and discrete field dynamics on minimal linear substrates.*
 > *Enterprise-grade cloud microservices—except the core business logic is pure Brainfuck. Best Friends Forever (`BFF`) with the most hostile programming language ever created.*
 
-An in-memory key-value database whose physical storage medium is a **65,536-cell (`64k`) Brainfuck memory tape**. Keys are hashed by a pure-Brainfuck program ([`bf/hash.bf`](bf/hash.bf)), and records are stored directly on the VM tape in 256 open-addressed buckets, served via a TypeScript [Fastify](https://fastify.dev) REST API with OpenAPI/Swagger documentation, a live Tape Hex Inspector UI, and Docker containerization.
+An in-memory key-value database whose physical storage medium is a **65,536-cell (`64k`) Brainfuck memory tape**. Keys are hashed by a pure-Brainfuck program ([`bf/hash.bf`](bf/hash.bf)), and records are stored directly on the VM tape in 256 open-addressed buckets. Try the **[Live Interactive Demo & Tape Hex Inspector on GitHub Pages](https://applied-tape-mechanics.github.io/bff-key-value-database/)** (running 100% client-side in your browser via the JavaScript Brainfuck VM), or run the full TypeScript [Fastify](https://fastify.dev) microservice locally/in Docker for the REST API and interactive OpenAPI/Swagger documentation (`/docs`).
 
 ---
 
